@@ -11,6 +11,7 @@ import {IParam} from './interfaces/IParam.sol';
 import {IRouter} from './interfaces/IRouter.sol';
 import {IWrappedNative} from './interfaces/IWrappedNative.sol';
 import {ApproveHelper} from './libraries/ApproveHelper.sol';
+import {FeeLogic} from './libraries/FeeLogic.sol';
 
 /// @title Agent implementation contract
 /// @notice Delegated by all users' agents
@@ -19,6 +20,7 @@ contract AgentImplementation is IAgent, ERC721Holder, ERC1155Holder {
     using SafeERC20 for IERC20;
     using Address for address;
     using Address for address payable;
+    using FeeLogic for IParam.Fee;
 
     /// @dev Flag for identifying the initialized state and reducing gas cost when resetting `_callbackWithCharge`
     bytes32 internal constant _INIT_CALLBACK_WITH_CHARGE = bytes32(bytes20(address(1)));
@@ -98,7 +100,7 @@ contract AgentImplementation is IAgent, ERC721Holder, ERC1155Holder {
     ) external payable {
         if (msg.sender != router) revert NotRouter();
         _doPermit2(permit2Datas, false);
-        _chargeFee(fees, true);
+        _chargeFee(fees, false);
         _executeLogics(logics, false);
         _returnTokens(tokensReturn);
     }
@@ -117,8 +119,8 @@ contract AgentImplementation is IAgent, ERC721Holder, ERC1155Holder {
                         (address, address, uint160, address)
                     );
                     IParam.Fee[] memory fees = new IParam.Fee[](1);
-                    fees[0] = IParam.Fee(token, _calculateFee(feeRate, amount), _PERMIT_FEE_META_DATA);
-                    _chargeFee(fees, false);
+                    fees[0] = FeeLogic.getFee(token, amount, feeRate, _PERMIT_FEE_META_DATA);
+                    _chargeFee(fees, true);
                 }
             } else if (selector == 0x0d58b1db) {
                 // transferFrom((address,address,uint160,address)[])
@@ -133,16 +135,12 @@ contract AgentImplementation is IAgent, ERC721Holder, ERC1155Holder {
                     IParam.Fee[] memory fees = new IParam.Fee[](detailsLength);
                     for (uint256 j; j < detailsLength; ) {
                         IAllowanceTransfer.AllowanceTransferDetails memory detail = details[j];
-                        fees[j] = IParam.Fee(
-                            detail.token,
-                            _calculateFee(feeRate, detail.amount),
-                            _PERMIT_FEE_META_DATA
-                        );
+                        fees[j] = FeeLogic.getFee(detail.token, detail.amount, feeRate, _PERMIT_FEE_META_DATA);
                         unchecked {
                             ++j;
                         }
                     }
-                    _chargeFee(fees, false);
+                    _chargeFee(fees, true);
                 }
             } else if (selector == 0x2b67b570 || selector == 0x2a2d80d1) {
                 // permit(address,((address,uint160,uint48,uint48),address,uint256),bytes)
@@ -303,31 +301,19 @@ contract AgentImplementation is IAgent, ERC721Holder, ERC1155Holder {
         // TODO: implement new msg.value fee charge mechanism
     }
 
-    function _chargeFee(IParam.Fee[] memory fees, bool chargeFromUser) internal {
+    function _chargeFee(IParam.Fee[] memory fees, bool chargeFromAgent) internal {
         uint256 length = fees.length;
         if (length == 0) return;
 
         address feeCollector = IRouter(router).feeCollector();
         for (uint256 i; i < length; ) {
-            uint256 amount = fees[i].amount;
-            if (amount == 0) {
-                unchecked {
-                    ++i;
-                }
-                continue;
-            }
-
             address token = fees[i].token;
-            if (token == _NATIVE) {
-                payable(feeCollector).sendValue(amount);
-            } else if (chargeFromUser) {
-                address user = IRouter(router).currentUser();
-                IAllowanceTransfer(permit2).transferFrom(user, feeCollector, amount.toUint160(), token);
+            if (token == _NATIVE || chargeFromAgent) {
+                fees[i].charge(feeCollector);
             } else {
-                IERC20(token).safeTransfer(feeCollector, amount);
+                address user = IRouter(router).currentUser();
+                fees[i].chargeFrom(feeCollector, user, permit2);
             }
-
-            emit FeeCharged(token, amount, fees[i].metadata);
             unchecked {
                 ++i;
             }
@@ -353,9 +339,5 @@ contract AgentImplementation is IAgent, ERC721Holder, ERC1155Holder {
                 }
             }
         }
-    }
-
-    function _calculateFee(uint256 feeRate, uint256 amount) internal pure returns (uint256) {
-        return (amount * feeRate) / (_BPS_BASE + feeRate);
     }
 }
