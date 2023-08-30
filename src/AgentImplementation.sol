@@ -12,6 +12,7 @@ import {IRouter} from './interfaces/IRouter.sol';
 import {IWrappedNative} from './interfaces/IWrappedNative.sol';
 import {ApproveHelper} from './libraries/ApproveHelper.sol';
 import {FeeLogic} from './libraries/FeeLogic.sol';
+import {CallbackLogic} from './libraries/CallbackLogic.sol';
 
 /// @title Agent implementation contract
 /// @notice Delegated by all users' agents
@@ -21,12 +22,7 @@ contract AgentImplementation is IAgent, ERC721Holder, ERC1155Holder {
     using Address for address;
     using Address for address payable;
     using FeeLogic for IParam.Fee;
-
-    /// @dev Flag for identifying the initialized state and reducing gas cost when resetting `_callbackWithCharge`
-    bytes32 internal constant _INIT_CALLBACK_WITH_CHARGE = bytes32(bytes20(address(1)));
-
-    /// @dev Flag for identifying whether to charge fee determined by the least significant bit of `_callbackWithCharge`
-    bytes32 internal constant _CHARGE_MASK = bytes32(uint256(1));
+    using CallbackLogic for bytes32;
 
     /// @dev Flag for identifying the fee source used only for event
     bytes32 internal constant _PERMIT_FEE_META_DATA = bytes32(bytes('permit2:pull-token'));
@@ -68,8 +64,8 @@ contract AgentImplementation is IAgent, ERC721Holder, ERC1155Holder {
 
     /// @notice Initialize user's agent and can only be called once.
     function initialize() external {
-        if (_callbackWithCharge != bytes32(0)) revert Initialized();
-        _callbackWithCharge = _INIT_CALLBACK_WITH_CHARGE;
+        if (_callbackWithCharge.isInitialized()) revert Initialized();
+        _callbackWithCharge = CallbackLogic._INIT_CALLBACK_WITH_CHARGE;
     }
 
     /// @notice Execute arbitrary logics and is only callable by the router. Charge fee during the execution of
@@ -167,18 +163,15 @@ contract AgentImplementation is IAgent, ERC721Holder, ERC1155Holder {
         bytes32 callbackWithCharge = _callbackWithCharge;
 
         // Revert if msg.sender is not equal to the callback address
-        if (msg.sender != address(bytes20(callbackWithCharge))) revert NotCallback();
-
-        // Retain the least significant bit to determine whether to charge fee on callback afterward
-        bool chargeFeeOnCallback = (callbackWithCharge & _CHARGE_MASK) != bytes32(0);
+        if (!callbackWithCharge.isCallback(msg.sender)) revert NotCallback();
 
         // Reset immediately to prevent reentrancy
         // If reentrancy is not blocked, an attacker could manipulate the callback contract to compel agent to execute
         // malicious logic, such as transferring funds from agents and users.
-        _callbackWithCharge = _INIT_CALLBACK_WITH_CHARGE;
+        _callbackWithCharge = CallbackLogic._INIT_CALLBACK_WITH_CHARGE;
 
         // Execute logics with the charge fee flag
-        _executeLogics(logics, chargeFeeOnCallback);
+        _executeLogics(logics, callbackWithCharge.isCharging());
     }
 
     function _getBalance(address token) internal view returns (uint256 balance) {
@@ -268,14 +261,9 @@ contract AgentImplementation is IAgent, ERC721Holder, ERC1155Holder {
             }
 
             // Set callback who should enter one-time `executeByCallback`
-            if (logics[i].callback != address(0)) {
-                bytes32 callback = bytes32(bytes20(logics[i].callback));
-                if (chargeFeeOnCallback) {
-                    // Set the least significant bit
-                    _callbackWithCharge = callback | _CHARGE_MASK;
-                } else {
-                    _callbackWithCharge = callback;
-                }
+            address callback = logics[i].callback;
+            if (callback != address(0)) {
+                _callbackWithCharge = CallbackLogic.getFlag(callback, chargeFeeOnCallback);
             }
 
             // Execute and send native
@@ -286,7 +274,7 @@ contract AgentImplementation is IAgent, ERC721Holder, ERC1155Holder {
             }
 
             // Revert if the previous call didn't enter `executeByCallback`
-            if (_callbackWithCharge != _INIT_CALLBACK_WITH_CHARGE) revert UnresetCallbackWithCharge();
+            if (!_callbackWithCharge.isReset()) revert UnresetCallbackWithCharge();
 
             // Unwrap to native after the call
             if (wrapMode == IParam.WrapMode.UNWRAP_AFTER) {
