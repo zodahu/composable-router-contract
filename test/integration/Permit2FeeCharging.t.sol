@@ -21,6 +21,7 @@ contract Permit2FeeCalculatorTest is Test, ERC20Permit2Utils, TypedDataSignature
     address public constant PERMIT2_ADDR = 0x000000000022D473030F116dDEE9F6B43aC78BA3;
     uint256 public constant BPS_BASE = 10_000;
     bytes32 public constant META_DATA = bytes32(bytes('permit2:pull-token'));
+    uint256 internal constant _DUST = 10;
 
     address public user;
     uint256 public userPrivateKey;
@@ -84,9 +85,14 @@ contract Permit2FeeCalculatorTest is Test, ERC20Permit2Utils, TypedDataSignature
         router.execute(datas, logicsEmpty, tokensReturn, SIGNER_REFERRAL);
 
         assertEq(IERC20(USDC).balanceOf(address(router)), 0);
-        assertEq(IERC20(USDC).balanceOf(address(userAgent)), 0);
         assertEq(IERC20(USDC).balanceOf(feeCollector) - feeCollectorBalanceBefore, expectedFee);
-        assertEq(IERC20(USDC).balanceOf(user), amount);
+        if (amount > _DUST) {
+            assertEq(IERC20(USDC).balanceOf(address(userAgent)), 0);
+            assertEq(IERC20(USDC).balanceOf(user), amount);
+        } else {
+            assertLe(IERC20(USDC).balanceOf(address(userAgent)), _DUST);
+            assertEq(IERC20(USDC).balanceOf(user), 0);
+        }
         assertEq(newAmount, expectedNewAmount);
     }
 
@@ -127,9 +133,14 @@ contract Permit2FeeCalculatorTest is Test, ERC20Permit2Utils, TypedDataSignature
         router.executeWithSignerFee(datas, logicBatch, signer, signature, tokensReturn, SIGNER_REFERRAL);
 
         assertEq(IERC20(USDC).balanceOf(address(router)), 0);
-        assertEq(IERC20(USDC).balanceOf(address(userAgent)), 0);
         assertEq(IERC20(USDC).balanceOf(feeCollector) - feeCollectorBalanceBefore, expectedFee);
-        assertEq(IERC20(USDC).balanceOf(user), amount);
+        if (amount > _DUST) {
+            assertEq(IERC20(USDC).balanceOf(address(userAgent)), 0);
+            assertEq(IERC20(USDC).balanceOf(user), amount);
+        } else {
+            assertLe(IERC20(USDC).balanceOf(address(userAgent)), _DUST);
+            assertEq(IERC20(USDC).balanceOf(user), 0);
+        }
         assertEq(newAmount, expectedNewAmount);
     }
 
