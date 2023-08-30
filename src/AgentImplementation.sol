@@ -30,6 +30,7 @@ contract AgentImplementation is IAgent, ERC721Holder, ERC1155Holder {
 
     /// @dev Flag for identifying the fee source used only for event
     bytes32 internal constant _PERMIT_FEE_META_DATA = bytes32(bytes('permit2:pull-token'));
+    bytes32 internal constant _NATIVE_FEE_META_DATA = bytes32(bytes('native-token'));
 
     /// @dev Flag for identifying the native address such as ETH on Ethereum
     address internal constant _NATIVE = 0xEeeeeEeeeEeEeeEeEeEeeEEEeeeeEeeeeeeeEEeE;
@@ -296,9 +297,14 @@ contract AgentImplementation is IAgent, ERC721Holder, ERC1155Holder {
     }
 
     function _chargeFeeByMsgValue() internal {
-        if (msg.value == 0) return;
-
-        // TODO: implement new msg.value fee charge mechanism
+        if (msg.value == 0) {
+            return;
+        } else {
+            uint256 feeRate = IRouter(router).feeRate();
+            address feeCollector = IRouter(router).feeCollector();
+            IParam.Fee memory fee = FeeLogic.getFee(_NATIVE, msg.value, feeRate, _NATIVE_FEE_META_DATA);
+            fee.charge(feeCollector);
+        }
     }
 
     function _chargeFee(IParam.Fee[] memory fees, bool chargeFromAgent) internal {
