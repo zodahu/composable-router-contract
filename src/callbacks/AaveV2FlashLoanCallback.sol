@@ -50,9 +50,13 @@ contract AaveV2FlashLoanCallback is IAaveV2FlashLoanCallback, CallbackFeeBase {
         for (uint256 i; i < assetsLength; ) {
             address asset = assets[i];
             uint256 amount = amounts[i];
-            IParam.Fee memory fee = FeeLogic.getFee(asset, amount, feeRate, metadata);
-            fee.charge(IRouter(router).feeCollector());
-            IERC20(asset).safeTransfer(agent, amount - fee.amount);
+            if (IAgent(agent).isCharging()) {
+                IParam.Fee memory fee = FeeLogic.getFee(asset, amount, feeRate, metadata);
+                fee.charge(IRouter(router).feeCollector());
+                IERC20(asset).safeTransfer(agent, amount - fee.amount);
+            } else {
+                IERC20(asset).safeTransfer(agent, amount);
+            }
             initBalances[i] = IERC20(asset).balanceOf(address(this));
 
             unchecked {

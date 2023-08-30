@@ -35,6 +35,7 @@ contract AaveV2FlashLoanCallbackTest is Test {
         // Return activated agent from router
         vm.mockCall(router, 0, abi.encodeWithSignature('getCurrentUserAgent()'), abi.encode(user, agent));
         vm.mockCall(router, 0, abi.encodeWithSignature('feeCollector()'), abi.encode(feeCollector));
+        vm.mockCall(agent, 0, abi.encodeWithSignature('isCharging()'), abi.encode(true));
         vm.label(address(flashLoanCallback), 'AaveV2FlashLoanCallback');
         vm.label(address(aaveV2Provider), 'AaveV2Provider');
         vm.label(address(mockERC20), 'mERC20');

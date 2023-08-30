@@ -62,6 +62,11 @@ contract AgentImplementation is IAgent, ERC721Holder, ERC1155Holder {
         permit2 = permit2_;
     }
 
+    /// @notice Return current fee charging status when calling
+    function isCharging() external view returns (bool) {
+        return _callbackWithCharge.isCharging();
+    }
+
     /// @notice Initialize user's agent and can only be called once.
     function initialize() external {
         if (_callbackWithCharge.isInitialized()) revert Initialized();

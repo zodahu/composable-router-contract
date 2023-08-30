@@ -40,9 +40,13 @@ contract BalancerV2FlashLoanCallback is IBalancerV2FlashLoanCallback, CallbackFe
         for (uint256 i; i < tokensLength; ) {
             address token = tokens[i];
             uint256 amount = amounts[i];
-            IParam.Fee memory fee = FeeLogic.getFee(token, amount, feeRate, metadata);
-            fee.charge(IRouter(router).feeCollector());
-            IERC20(token).safeTransfer(agent, amount - fee.amount);
+            if (IAgent(agent).isCharging()) {
+                IParam.Fee memory fee = FeeLogic.getFee(token, amount, feeRate, metadata);
+                fee.charge(IRouter(router).feeCollector());
+                IERC20(token).safeTransfer(agent, amount - fee.amount);
+            } else {
+                IERC20(token).safeTransfer(agent, amount);
+            }
             initBalances[i] = IERC20(token).balanceOf(address(this));
 
             unchecked {

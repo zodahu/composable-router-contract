@@ -35,6 +35,7 @@ contract BalancerV2FlashLoanCallbackTest is Test {
         // Return activated agent from router
         vm.mockCall(router, 0, abi.encodeWithSignature('getCurrentUserAgent()'), abi.encode(user, agent));
         vm.mockCall(router, 0, abi.encodeWithSignature('feeCollector()'), abi.encode(feeCollector));
+        vm.mockCall(agent, 0, abi.encodeWithSignature('isCharging()'), abi.encode(true));
         vm.label(address(flashLoanCallback), 'BalancerV2FlashLoanCallback');
         vm.label(BALANCER_V2_VAULT, 'BalancerV2Vault');
         vm.label(address(mockERC20), 'mERC20');
