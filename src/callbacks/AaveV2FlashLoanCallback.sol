@@ -39,49 +39,58 @@ contract AaveV2FlashLoanCallback is IAaveV2FlashLoanCallback, CallbackFeeBase {
         address, // initiator
         bytes calldata params
     ) external returns (bool) {
-        address pool = IAaveV2Provider(aaveV2Provider).getLendingPool();
+        if (msg.sender != IAaveV2Provider(aaveV2Provider).getLendingPool()) revert InvalidCaller();
+        uint256[] memory initBalances;
+        IParam.Fee[] memory fees;
+        {
+            (, address agent) = IRouter(router).getCurrentUserAgent();
 
-        if (msg.sender != pool) revert InvalidCaller();
-        (, address agent) = IRouter(router).getCurrentUserAgent();
-
-        // Transfer assets to the agent and record initial balances
-        uint256 assetsLength = assets.length;
-        uint256[] memory initBalances = new uint256[](assetsLength);
-        for (uint256 i; i < assetsLength; ) {
-            address asset = assets[i];
-            uint256 amount = amounts[i];
-            if (IAgent(agent).isCharging()) {
-                IParam.Fee memory fee = FeeLogic.getFee(asset, amount, feeRate, metadata);
-                fee.charge(IRouter(router).feeCollector());
-                IERC20(asset).safeTransfer(agent, amount - fee.amount);
-            } else {
+            // Transfer assets to the agent and record initial balances
+            initBalances = new uint256[](assets.length);
+            if (feeRate > 0 && IAgent(agent).isCharging()) {
+                fees = new IParam.Fee[](assets.length);
+            }
+            for (uint256 i; i < assets.length; ) {
+                address asset = assets[i];
+                uint256 amount = amounts[i];
+                if (fees.length > 0) {
+                    fees[i] = FeeLogic.calculateFee(asset, amount, feeRate, metadata);
+                }
                 IERC20(asset).safeTransfer(agent, amount);
-            }
-            initBalances[i] = IERC20(asset).balanceOf(address(this));
+                initBalances[i] = IERC20(asset).balanceOf(address(this));
 
-            unchecked {
-                ++i;
+                unchecked {
+                    ++i;
+                }
             }
+
+            agent.functionCall(
+                abi.encodePacked(IAgent.executeByCallback.selector, params),
+                'ERROR_AAVE_V2_FLASH_LOAN_CALLBACK'
+            );
         }
 
-        agent.functionCall(
-            abi.encodePacked(IAgent.executeByCallback.selector, params),
-            'ERROR_AAVE_V2_FLASH_LOAN_CALLBACK'
-        );
-
         // Approve assets for pulling from Aave Pool
-        for (uint256 i; i < assetsLength; ) {
-            address asset = assets[i];
-            uint256 amountOwing = amounts[i] + premiums[i];
+        {
+            address pool = IAaveV2Provider(aaveV2Provider).getLendingPool();
+            address feeCollector = IRouter(router).feeCollector();
+            for (uint256 i; i < assets.length; ) {
+                address asset = assets[i];
+                uint256 amountOwing = amounts[i] + premiums[i];
+                if (fees.length > 0) {
+                    fees[i].charge(feeCollector);
+                }
 
-            // Check balance is valid
-            if (IERC20(asset).balanceOf(address(this)) != initBalances[i] + amountOwing) revert InvalidBalance(asset);
+                // Check balance is valid
+                if (IERC20(asset).balanceOf(address(this)) != initBalances[i] + amountOwing)
+                    revert InvalidBalance(asset);
 
-            // Save gas by only the first user does approve. It's safe since this callback don't hold any asset
-            ApproveHelper._approveMax(asset, pool, amountOwing);
+                // Save gas by only the first user does approve. It's safe since this callback don't hold any asset
+                ApproveHelper._approveMax(asset, pool, amountOwing);
 
-            unchecked {
-                ++i;
+                unchecked {
+                    ++i;
+                }
             }
         }
 

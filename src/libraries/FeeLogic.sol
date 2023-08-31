@@ -48,14 +48,27 @@ library FeeLogic {
 
     function getFee(
         address token,
+        uint256 amountWithFee,
+        uint256 feeRate,
+        bytes32 metadata
+    ) internal pure returns (IParam.Fee memory ret) {
+        ret = IParam.Fee(token, _calculateFeeFromAmountWithFee(amountWithFee, feeRate), metadata);
+    }
+
+    function calculateFee(
+        address token,
         uint256 amount,
         uint256 feeRate,
         bytes32 metadata
     ) internal pure returns (IParam.Fee memory ret) {
-        ret = IParam.Fee(token, _calculateFee(amount, feeRate), metadata);
+        ret = IParam.Fee(token, _calculateFeeFromAmount(amount, feeRate), metadata);
     }
 
-    function _calculateFee(uint256 amount, uint256 feeRate) private pure returns (uint256) {
-        return (amount * feeRate) / (BPS_BASE + feeRate);
+    function _calculateFeeFromAmountWithFee(uint256 amountWithFee, uint256 feeRate) private pure returns (uint256) {
+        return (amountWithFee * feeRate) / (BPS_BASE + feeRate);
+    }
+
+    function _calculateFeeFromAmount(uint256 amount, uint256 feeRate) private pure returns (uint256) {
+        return (amount * feeRate) / (BPS_BASE);
     }
 }

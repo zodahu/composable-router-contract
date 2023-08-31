@@ -32,43 +32,52 @@ contract BalancerV2FlashLoanCallback is IBalancerV2FlashLoanCallback, CallbackFe
         bytes calldata userData
     ) external {
         if (msg.sender != balancerV2Vault) revert InvalidCaller();
-        (, address agent) = IRouter(router).getCurrentUserAgent();
+        uint256[] memory initBalances;
+        IParam.Fee[] memory fees;
+        {
+            (, address agent) = IRouter(router).getCurrentUserAgent();
 
-        // Transfer assets to the agent and record initial balances
-        uint256 tokensLength = tokens.length;
-        uint256[] memory initBalances = new uint256[](tokensLength);
-        for (uint256 i; i < tokensLength; ) {
-            address token = tokens[i];
-            uint256 amount = amounts[i];
-            if (IAgent(agent).isCharging()) {
-                IParam.Fee memory fee = FeeLogic.getFee(token, amount, feeRate, metadata);
-                fee.charge(IRouter(router).feeCollector());
-                IERC20(token).safeTransfer(agent, amount - fee.amount);
-            } else {
+            // Transfer assets to the agent and record initial balances
+            initBalances = new uint256[](tokens.length);
+            if (feeRate > 0 && IAgent(agent).isCharging()) {
+                fees = new IParam.Fee[](tokens.length);
+            }
+            for (uint256 i; i < tokens.length; ) {
+                address token = tokens[i];
+                uint256 amount = amounts[i];
+                if (fees.length > 0) {
+                    fees[i] = FeeLogic.calculateFee(token, amount, feeRate, metadata);
+                }
                 IERC20(token).safeTransfer(agent, amount);
-            }
-            initBalances[i] = IERC20(token).balanceOf(address(this));
+                initBalances[i] = IERC20(token).balanceOf(address(this));
 
-            unchecked {
-                ++i;
+                unchecked {
+                    ++i;
+                }
             }
+
+            agent.functionCall(
+                abi.encodePacked(IAgent.executeByCallback.selector, userData),
+                'ERROR_BALANCER_V2_FLASH_LOAN_CALLBACK'
+            );
         }
 
-        agent.functionCall(
-            abi.encodePacked(IAgent.executeByCallback.selector, userData),
-            'ERROR_BALANCER_V2_FLASH_LOAN_CALLBACK'
-        );
-
         // Repay tokens to Vault
-        for (uint256 i; i < tokensLength; ) {
-            address token = tokens[i];
-            IERC20(token).safeTransfer(balancerV2Vault, amounts[i] + feeAmounts[i]);
+        {
+            address feeCollector = IRouter(router).feeCollector();
+            for (uint256 i; i < tokens.length; ) {
+                address token = tokens[i];
+                if (fees.length > 0) {
+                    fees[i].charge(feeCollector);
+                }
+                IERC20(token).safeTransfer(balancerV2Vault, amounts[i] + feeAmounts[i]);
 
-            // Check balance is valid
-            if (IERC20(token).balanceOf(address(this)) != initBalances[i]) revert InvalidBalance(token);
+                // Check balance is valid
+                if (IERC20(token).balanceOf(address(this)) != initBalances[i]) revert InvalidBalance(token);
 
-            unchecked {
-                ++i;
+                unchecked {
+                    ++i;
+                }
             }
         }
     }
